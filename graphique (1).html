@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Répartition des EPLE selon leur réponse à l’enquête</title>
+<style>
+  :root { color-scheme: light; --surface:#fcfcfb; --ink:#0b0b0b; --ink-2:#52514e; --line:#d9d8d3;
+    --c-avec:#2a78d6; --c-sans:#9cc3f0; --c-nr:#d9d8d3; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; background:var(--surface); color:var(--ink);
+    font:13px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .wrap { padding:10px 12px 14px; }
+  .top { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; margin-bottom:10px; }
+  .legend { display:flex; flex-wrap:wrap; gap:4px 14px; }
+  .legend span { display:inline-flex; align-items:center; gap:6px; }
+  .sw { width:12px; height:12px; border-radius:2px; border:1px solid rgba(0,0,0,.25); flex:none; }
+  .ctl { margin-left:auto; color:var(--ink-2); display:flex; align-items:center; gap:6px; }
+  select { font:inherit; padding:3px 6px; border:1px solid var(--line); border-radius:4px; background:#fff; color:var(--ink); }
+  .head, .row { display:grid; grid-template-columns:minmax(120px,230px) 1fr minmax(90px,150px); gap:10px; align-items:center; }
+  .head { color:var(--ink-2); font-size:11px; text-transform:uppercase; letter-spacing:.04em; margin-bottom:4px; }
+  .row { padding:3px 0; border-top:1px solid #eeede9; }
+  .lab { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lab small { color:var(--ink-2); }
+  .bar { display:flex; height:22px; border-radius:3px; overflow:hidden; background:var(--c-nr); border:1px solid rgba(0,0,0,.18); }
+  .seg { display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:600; overflow:hidden; white-space:nowrap; }
+  .seg.avec { background:var(--c-avec); color:#fff; position:relative; overflow:visible; z-index:2; }
+  .lb { white-space:nowrap; }
+  .lb.out { position:absolute; left:100%; margin-left:4px; top:50%; transform:translateY(-50%); color:#0b0b0b; background:rgba(255,255,255,.88); padding:0 3px; border-radius:3px; }
+  .seg.sans { background:var(--c-sans); color:#0b0b0b; }
+  .seg.nr { background:var(--c-nr); color:#3d3c39; }
+  .rep { color:var(--ink-2); font-variant-numeric:tabular-nums; text-align:right; }
+  .axis { display:grid; grid-template-columns:minmax(120px,230px) 1fr minmax(90px,150px); gap:10px; color:var(--ink-2); font-size:11px; margin-top:4px; }
+  .ticks { display:flex; justify-content:space-between; }
+  .msg { padding:14px; color:var(--ink-2); }
+  .foot { margin-top:8px; color:var(--ink-2); font-size:12px; }
+  @media (max-width:560px) { .head, .row, .axis { grid-template-columns:100px 1fr 0; } .rep, .head span:last-child { display:none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="legend" aria-label="Légende">
+      <span><i class="sw" style="background:var(--c-avec)"></i>Au moins une action déclarée</span>
+      <span><i class="sw" style="background:var(--c-sans)"></i>A répondu, aucune action propre</span>
+      <span><i class="sw" style="background:var(--c-nr)"></i>Pas de réponse</span>
+    </div>
+    <label class="ctl">Trier par
+      <select id="sort">
+        <option value="alpha">Ordre alphabétique</option>
+        <option value="avec">Part avec action (décroissant)</option>
+        <option value="rep">Part de répondants (décroissant)</option>
+        <option value="nr">Pas de réponse (décroissant)</option>
+      </select>
+    </label>
+  </div>
+  <div id="msg" class="msg" hidden></div>
+  <div class="head" id="head" hidden><span>Territoire</span><span>Part des EPLE (100 % = ensemble des EPLE du territoire)</span><span>Action parmi les répondants</span></div>
+  <div id="rows"></div>
+  <div class="axis" id="axis" hidden><span></span><div class="ticks"><span>0 %</span><span>25 %</span><span>50 %</span><span>75 %</span><span>100 %</span></div><span></span></div>
+  <div class="foot" id="foot"></div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var rows = [], hasCount = false, hasDept = false, hasRep = false;
+  var el = function (t, c, txt) { var n = document.createElement(t); if (c) n.className = c; if (txt !== undefined) n.textContent = txt; return n; };
+  function num(v) { var n = parseFloat(String(v === null || v === undefined ? '' : v).replace(',', '.')); return isFinite(n) ? n : null; }
+  function fmt(x) { return (Math.round(x * 10) / 10).toString().replace('.', ','); }
+
+  function normalize(raw) {
+    var out = [];
+    raw.forEach(function (r) {
+      var a = num(r.avec), s = num(r.sans), n = num(r.nr);
+      if (a === null && s === null && n === null) return;
+      a = a || 0; s = s || 0; n = n || 0;
+      var tot = a + s + n; if (tot <= 0) return;
+      out.push({
+        label: String(r.label === null || r.label === undefined ? '' : r.label).trim() || '(sans nom)',
+        dept: hasDept && r.dept ? String(r.dept).trim() : '',
+        avec: 100 * a / tot, sans: 100 * s / tot, nr: 100 * n / tot,
+        count: hasCount ? num(r.count) : null,
+        rep: hasRep ? num(r.rep) : null
+      });
+    });
+    return out;
+  }
+
+  function sorted() {
+    var k = document.getElementById('sort').value, a = rows.slice();
+    a.sort(function (x, y) {
+      if (k === 'avec') return y.avec - x.avec;
+      if (k === 'nr') return y.nr - x.nr;
+      if (k === 'rep') return (y.avec + y.sans) - (x.avec + x.sans);
+      return (x.label + x.dept).localeCompare(y.label + y.dept, 'fr');
+    });
+    return a;
+  }
+
+  function seg(cls, pct, text, tip) {
+    var s = el('div', 'seg ' + cls);
+    if (pct >= (cls === 'avec' ? 0.5 : 3)) s.appendChild(el('span', 'lb', fmt(pct) + ' %'));
+    s.style.width = pct + '%'; s.title = tip; s.setAttribute('aria-label', tip);
+    return s;
+  }
+
+  // Étiquette dans le segment si elle y tient ; sinon, pour le bleu foncé, juste à droite du segment ; sinon masquée.
+  function fit() {
+    var lbs = document.querySelectorAll('.seg > .lb');
+    Array.prototype.forEach.call(lbs, function (sp) {
+      var sg = sp.parentNode;
+      sp.classList.remove('out'); sp.style.visibility = '';
+      if (sp.offsetWidth + 6 <= sg.clientWidth) return;
+      if (sg.classList.contains('avec')) sp.classList.add('out'); else sp.style.visibility = 'hidden';
+    });
+  }
+  window.addEventListener('resize', fit);
+  function tipFor(r, name, pct) {
+    var t = name + ' : ' + fmt(pct) + ' %';
+    if (r.count) t += ' (environ ' + Math.round(r.count * pct / 100) + ' EPLE sur ' + r.count + ')';
+    return t;
+  }
+
+  function render() {
+    var box = document.getElementById('rows'); box.textContent = '';
+    var msg = document.getElementById('msg');
+    if (!rows.length) {
+      msg.hidden = false; msg.textContent = 'Aucune donnée à afficher pour le moment.';
+      document.getElementById('head').hidden = true; document.getElementById('axis').hidden = true; return;
+    }
+    msg.hidden = true; document.getElementById('head').hidden = false; document.getElementById('axis').hidden = false;
+    var counts = {}; rows.forEach(function (r) { counts[r.label] = (counts[r.label] || 0) + 1; });
+    sorted().forEach(function (r) {
+      var row = el('div', 'row');
+      var lab = el('div', 'lab', r.label);
+      if (r.dept && counts[r.label] > 1) lab.appendChild(el('small', '', ' (' + r.dept + ')'));
+      lab.title = r.label + (r.dept ? ' – ' + r.dept : '');
+      var bar = el('div', 'bar');
+      bar.appendChild(seg('avec', r.avec, '', tipFor(r, 'Au moins une action déclarée', r.avec)));
+      bar.appendChild(seg('sans', r.sans, '', tipFor(r, 'A répondu, aucune action propre', r.sans)));
+      bar.appendChild(seg('nr', r.nr, '', tipFor(r, 'Pas de réponse', r.nr)));
+      var rep = el('div', 'rep');
+      var denom = r.avec + r.sans;
+      rep.textContent = denom > 0 ? fmt(100 * r.avec / denom) + ' %' : '–';
+      if (hasRep && r.rep !== null) rep.textContent = fmt(r.rep) + ' %';
+      row.appendChild(lab); row.appendChild(bar); row.appendChild(rep);
+      box.appendChild(row);
+    });
+    var f = 'Répondants = « au moins une action » + « aucune action propre ». ';
+    document.getElementById('foot').textContent = f + rows.length + ' territoire' + (rows.length > 1 ? 's' : '') + ' affiché' + (rows.length > 1 ? 's' : '') + '.';
+    fit();
+  }
+  document.getElementById('sort').addEventListener('change', render);
+
+  var demo = /[?&]demo/.test(location.search) || window.parent === window;
+  function loadGristApi(ok, fail) {
+    var o = [];
+    function add(x) { if (x && /^https:\/\//.test(x) && o.indexOf(x) < 0) o.push(x); }
+    try { if (location.ancestorOrigins && location.ancestorOrigins.length) add(location.ancestorOrigins[0]); } catch (e) {}
+    try { if (document.referrer) add(new URL(document.referrer).origin); } catch (e) {}
+    add('https://docs.getgrist.com');
+    try { if (location.ancestorOrigins && /^http:\/\/localhost/.test(location.ancestorOrigins[0] || '')) o.unshift(location.ancestorOrigins[0]); } catch (e) {}
+    (function next(i) {
+      if (i >= o.length) { fail(); return; }
+      var sc = document.createElement('script'); sc.src = o[i] + '/grist-plugin-api.js';
+      sc.onload = function () { if (window.grist && typeof window.grist.onRecords === 'function') ok(); else next(i + 1); };
+      sc.onerror = function () { next(i + 1); };
+      document.head.appendChild(sc);
+    })(0);
+  }
+  function start() {
+    grist.ready({ requiredAccess: 'read table', columns: [
+      { name: 'label', title: 'Territoire (BEF ou Département)', type: 'Any' },
+      { name: 'avec',  title: 'Part avec action (Avec_action)', type: 'Numeric' },
+      { name: 'sans',  title: 'Part sans action (Sans_action)', type: 'Numeric' },
+      { name: 'nr',    title: 'Part sans réponse (Sans_reponse)', type: 'Numeric' },
+      { name: 'count', title: 'Nombre d’EPLE (count)', type: 'Any', optional: true },
+      { name: 'dept',  title: 'Département (pour distinguer les BEF)', type: 'Any', optional: true },
+      { name: 'rep',   title: 'Action parmi les répondants (Action_parmi_repondants)', type: 'Numeric', optional: true }
+    ]});
+    grist.onRecords(function (recs, mappings) {
+      if (!mappings || !mappings.label || !mappings.avec || !mappings.sans || !mappings.nr) {
+        var m = document.getElementById('msg'); m.hidden = false;
+        m.textContent = 'Associez les colonnes dans le panneau de droite.'; return;
+      }
+      hasCount = !!mappings.count; hasDept = !!mappings.dept; hasRep = !!mappings.rep;
+      rows = normalize(grist.mapColumnNames(recs) || []); render();
+    });
+  }
+  if (!demo) {
+    var m0 = document.getElementById('msg'); m0.hidden = false; m0.textContent = 'Chargement…';
+    loadGristApi(start, function () { m0.textContent = 'Impossible de charger l’API Grist.'; });
+  } else {
+    var d = [['BEF DU BESSIN','Calvados',9.1,0,90.9,11],['BEF CAEN SUD','Calvados',3.1,0,96.9,32],['BEF LOUVIERS','Eure',0,0,100,36],
+      ['BEF EVREUX','Eure',6.7,3.3,90,30],['BEF CENTRE MANCHE','Manche',2.8,0,97.2,36],['BEF LE HAVRE','Seine-Maritime',9.8,2.4,87.8,41]];
+    hasCount = hasDept = true;
+    rows = normalize(d.map(function (x) { return { label:x[0], dept:x[1], avec:x[2], sans:x[3], nr:x[4], count:x[5] }; }));
+    render();
+  }
+})();
+</script>
+</body>
+</html>
